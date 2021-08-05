@@ -6,7 +6,7 @@ setuptools.setup(
     author="Barry Bragg",
     author_email="hokieg3n1us@gmail.com",
     description="Generate a gif or mp4 from goespatial vector data.",
-    url="https://github.com/pypa/sampleproject",
+    url="https://github.com/hokieg3n1us/motionshader",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
