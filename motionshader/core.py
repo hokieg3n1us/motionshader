@@ -149,7 +149,7 @@ class MotionVideo:
         self.dataset = dataset
         self.basemap = basemap
 
-    def _generate_frame(self, frame_df: dask.dataframe, viewport: GeospatialViewport, scale_points: bool, color_map):
+    def _generate_frame(self, frame_df: dask.dataframe, viewport: GeospatialViewport, scale_points_pixels: int, color_map):
         cvs = datashader.Canvas(plot_width=viewport.width_pixels, plot_height=viewport.height_pixels,
                                 x_range=(viewport.min_longitude, viewport.max_longitude),
                                 y_range=(viewport.min_latitude, viewport.max_latitude))
@@ -157,14 +157,14 @@ class MotionVideo:
 
         img = datashader.tf.shade(agg, cmap=color_map, how='eq_hist')
 
-        if scale_points:
-            img = datashader.tf.dynspread(img)
+        if scale_points_pixels != 0:
+            img = datashader.tf.spread(img, px=scale_points_pixels, shape="circle")
 
         return img.to_pil().convert("RGBA")
 
     def to_gif(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_base_name: str,
                annotation: FrameAnnotation = None,
-               watermark: FrameWatermark = None, scale_points: bool = True, color_map=colorcet.fire):
+               watermark: FrameWatermark = None, scale_points_pixels: int = 0, color_map=colorcet.fire):
         imgs = []
 
         tiles = self.basemap.get_tiles(viewport)
@@ -174,7 +174,7 @@ class MotionVideo:
 
         while start < end:
             frame_df = self.dataset.subset(start, start + playback.frame_length)
-            frame = self._generate_frame(frame_df, viewport, scale_points, color_map)
+            frame = self._generate_frame(frame_df, viewport, scale_points_pixels, color_map)
             img = Image.alpha_composite(tiles, frame)
 
             if annotation is not None:
@@ -191,7 +191,7 @@ class MotionVideo:
 
     def to_video(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_base_name: str,
                  annotation: FrameAnnotation = None,
-                 watermark: FrameWatermark = None, scale_points: bool = True, color_map=colorcet.fire):
+                 watermark: FrameWatermark = None, scale_points_pixels: int = 0, color_map=colorcet.fire):
 
         tiles = self.basemap.get_tiles(viewport)
 
@@ -202,7 +202,7 @@ class MotionVideo:
 
         while start < end:
             frame_df = self.dataset.subset(start, start + playback.frame_length)
-            frame = self._generate_frame(frame_df, viewport, scale_points, color_map)
+            frame = self._generate_frame(frame_df, viewport, scale_points_pixels, color_map)
             img = Image.alpha_composite(tiles, frame)
 
             if annotation is not None:

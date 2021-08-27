@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="motionshader",
-    version="1.0.2",
+    version="1.0.3",
     author="Barry Bragg",
     author_email="hokieg3n1us@gmail.com",
     description="Generate a gif or mp4 from geospatial vector data.",
