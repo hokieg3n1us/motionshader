@@ -6,7 +6,8 @@ import dask.dataframe
 import datashader
 import imageio
 import numpy
-from PIL import Image
+from PIL.ImageFont import FreeTypeFont
+from PIL import Image, ImageDraw, ImageFont
 from requests import Session
 
 
@@ -15,17 +16,22 @@ class GeospatialViewport:
     max_longitude: float = None
     min_latitude: float = None
     max_latitude: float = None
-    widthPixels: int = None
-    heightPixels: int = None
+    center_longitude: float = None
+    center_latitude: float = None
+    width_pixels: int = None
+    height_pixels: int = None
 
-    def __init__(self, min_longitude=-180.0, max_longitude=180.0, min_latitude=-90.0, max_latitude=90, widthPixels=1920,
-                 heightPixels=1080) -> None:
+    def __init__(self, min_longitude=-180.0, max_longitude=180.0, min_latitude=-90.0, max_latitude=90,
+                 width_pixels=1920,
+                 height_pixels=1080) -> None:
         self.min_longitude = min_longitude
         self.max_longitude = max_longitude
         self.min_latitude = min_latitude
         self.max_latitude = max_latitude
-        self.widthPixels = widthPixels
-        self.heightPixels = heightPixels
+        self.width_pixels = width_pixels
+        self.height_pixels = height_pixels
+        self.center_longitude = self.min_longitude + ((self.max_longitude - self.min_longitude) / 2.0)
+        self.center_latitude = self.min_latitude + ((self.max_latitude - self.min_latitude) / 2.0)
 
 
 class TemporalPlayback:
@@ -58,7 +64,7 @@ class Basemap:
         request_url = self.basemap_url + '?bbox={YMIN},{XMIN},{YMAX},{XMAX}&width={WIDTH}&height={HEIGHT}&layers={LAYER}&format=image/png&service=WMS&version=1.3.0&crs=EPSG:4326&request=GetMap&styles='
         request_url = request_url.format(XMIN=viewport.min_longitude, XMAX=viewport.max_longitude,
                                          YMIN=viewport.min_latitude, YMAX=viewport.max_latitude,
-                                         WIDTH=viewport.widthPixels, HEIGHT=viewport.heightPixels,
+                                         WIDTH=viewport.width_pixels, HEIGHT=viewport.height_pixels,
                                          LAYER=self.basemap_layer)
         response = self.basemap_session.get(request_url)
         return Image.open(io.BytesIO(response.content)).convert("RGBA")
@@ -78,6 +84,63 @@ class Dataset:
         return self.df[start_time: end_time]
 
 
+class FrameAnnotation:
+    pos_x = 0
+    pos_y = 0
+    font = None
+    font_color = None
+    lon_lat = None
+    date_format = None
+
+    def __init__(self, pos_x: int, pos_y: int, font: FreeTypeFont = ImageFont.truetype('arial', 10),
+                 font_color: str = '#000000', lon_lat: bool = True, date_format: str = '%Y-%m-%dT%H:%M:%S%z') -> None:
+        self.pos_x = pos_x
+        self.pos_y = pos_y
+        self.font = font
+        self.font_color = font_color
+        self.lon_lat = lon_lat
+        self.date_format = date_format
+
+    def annotate(self, img, start_time, end_time, center_longitude, center_latitude):
+        image_draw = ImageDraw.Draw(img)
+
+        annotation = "Time Range: {}/{} Center Coordinate: ({:0>3.3f}, {:0>2.3f})".format(
+            start_time.strftime(self.date_format), end_time.strftime(self.date_format),
+            center_longitude, center_latitude)
+
+        if not self.lon_lat:
+            annotation = "Time Range: {}/{} Center Coordinate: ({:0>2.3f}, {:0>3.3f})".format(
+                start_time.strftime(self.date_format), end_time.strftime(self.date_format),
+                center_latitude, center_longitude)
+
+        image_draw.text((self.pos_x, self.pos_y), annotation, font=self.font, fill=self.font_color)
+
+        return img
+
+
+class FrameWatermark:
+    watermark = ""
+    pos_x = 0
+    pos_y = 0
+    font = None
+    font_color = None
+
+    def __init__(self, watermark: str, pos_x: int, pos_y: int, font: FreeTypeFont = ImageFont.truetype('arial', 10),
+                 font_color: str = '#000000') -> None:
+        self.watermark = watermark
+        self.pos_x = pos_x
+        self.pos_y = pos_y
+        self.font = font
+        self.font_color = font_color
+
+    def add_watermark(self, img):
+        image_draw = ImageDraw.Draw(img)
+
+        image_draw.text((self.pos_x, self.pos_y), self.watermark, font=self.font, fill=self.font_color)
+
+        return img
+
+
 class MotionVideo:
     dataset: Dataset = None
     basemap: Basemap = None
@@ -87,14 +150,15 @@ class MotionVideo:
         self.basemap = basemap
 
     def _generate_frame(self, frame_df: dask.dataframe, viewport: GeospatialViewport, color_map):
-        cvs = datashader.Canvas(plot_width=viewport.widthPixels, plot_height=viewport.heightPixels,
+        cvs = datashader.Canvas(plot_width=viewport.width_pixels, plot_height=viewport.height_pixels,
                                 x_range=(viewport.min_longitude, viewport.max_longitude),
                                 y_range=(viewport.min_latitude, viewport.max_latitude))
         agg = cvs.points(frame_df, self.dataset.longitude_column, self.dataset.latitude_column)
         return datashader.tf.shade(agg, cmap=color_map, how='eq_hist').to_pil().convert("RGBA")
 
     def to_gif(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_base_name: str,
-               color_map=colorcet.fire):
+               annotation: FrameAnnotation = None,
+               watermark: FrameWatermark = None, color_map=colorcet.fire):
         imgs = []
 
         tiles = self.basemap.get_tiles(viewport)
@@ -106,13 +170,22 @@ class MotionVideo:
             frame_df = self.dataset.subset(start, start + playback.frame_length)
             frame = self._generate_frame(frame_df, viewport, color_map)
             img = Image.alpha_composite(tiles, frame)
+
+            if annotation is not None:
+                img = annotation.annotate(img, start, (start + playback.frame_length), viewport.center_longitude,
+                                          viewport.center_latitude)
+            if watermark is not None:
+                img = watermark.add_watermark(img)
+
             imgs.append(img)
+
             start = start + playback.frame_step
 
         imageio.mimsave(file_base_name + '.gif', imgs, fps=playback.frames_per_second)
 
     def to_video(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_base_name: str,
-                 color_map=colorcet.fire):
+                 annotation: FrameAnnotation = None,
+                 watermark: FrameWatermark = None, color_map=colorcet.fire):
 
         tiles = self.basemap.get_tiles(viewport)
 
@@ -124,7 +197,15 @@ class MotionVideo:
         while start < end:
             frame_df = self.dataset.subset(start, start + playback.frame_length)
             frame = self._generate_frame(frame_df, viewport, color_map)
-            mp4_writer.append_data(numpy.array(Image.alpha_composite(tiles, frame)))
+            img = Image.alpha_composite(tiles, frame)
+
+            if annotation is not None:
+                img = annotation.annotate(img, start, (start + playback.frame_length), viewport.center_longitude,
+                                          viewport.center_latitude)
+            if watermark is not None:
+                img = watermark.add_watermark(img)
+
+            mp4_writer.append_data(numpy.array(img))
             start = start + playback.frame_step
 
         mp4_writer.close()

@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import dask.dataframe
 import requests
 
+from PIL import ImageFont
+
+import colorcet
 import motionshader
 
 if __name__ == '__main__':
@@ -15,7 +18,9 @@ if __name__ == '__main__':
 
     # Define a Basemap using a WMS Service and associated layer. Assumes EPSG:4326.
     # Provide a requests.Session() that can be customized for authentication or 2-way SSL verification.
-    basemap = motionshader.Basemap(requests.Session(), 'https://basemap.nationalmap.gov/arcgis/services/USGSImageryOnly/MapServer/WMSServer', '0')
+    basemap = motionshader.Basemap(requests.Session(),
+                                   'https://ows.terrestris.de/osm/service',
+                                   'OSM-WMS')
 
     # Define the Dataset, providing a Dask DataFrame and the names of the longitude and latitude columns.
     dataset = motionshader.Dataset(df, 'longitude', 'latitude')
@@ -30,6 +35,19 @@ if __name__ == '__main__':
     playback = motionshader.TemporalPlayback(datetime(2020, 4, 1), datetime(2020, 4, 2), timedelta(minutes=30),
                                              timedelta(minutes=15), 5)
 
+    # If a FrameAnnotation is provided to the rendering function, the time range and center coordinate will be
+    # added onto each frame. The FrameAnnotation allows customizing the position of the label in pixel coordinates,
+    # the font, the font color, the coordinate order, and the date format.
+    annotation = motionshader.FrameAnnotation(10, 10, ImageFont.truetype('arial', 14),
+                                              '#000000', True, '%Y-%m-%dT%H:%M:%S%z')
+
+    # If a Watermark is provided to the rendering function, the watermark text provided will be added
+    # onto each frame. The Watermark allows customizing the position of the watermark in pixel coordinates,
+    # the font, and the font color.
+    watermark = motionshader.FrameWatermark("Rendered using Motionshader", 10, viewport.height_pixels - 40,
+                                            ImageFont.truetype('arial', 14),
+                                            '#000000')
+
     # MotionVideo can be output as either a GIF or an MP4.
-    motion_video.to_gif(viewport, playback, 'NYC')
-    motion_video.to_video(viewport, playback, 'NYC')
+    motion_video.to_gif(viewport, playback, 'NYC', annotation, watermark, colorcet.fire)
+    motion_video.to_video(viewport, playback, 'NYC', annotation, watermark, colorcet.fire)
