@@ -36,8 +36,8 @@ if __name__ == '__main__':
     # TemporalPlayback defines the temporal bounds, temporal size of a frame, and the frames per second for the output.
     # In this example, a single frame contains 30 minutes of data, and steps forward 15 minutes between frames.
     viewport = motionshader.GeospatialViewport(min_longitude, max_longitude, min_latitude, max_latitude, 1920, 1080)
-    playback = motionshader.TemporalPlayback(start_datetime, end_datetime, timedelta(seconds=15),
-                                             timedelta(seconds=5), 5)
+    playback = motionshader.TemporalPlayback(start_datetime, end_datetime, timedelta(seconds=60),
+                                             timedelta(seconds=30), 5)
 
     # If a FrameAnnotation is provided to the rendering function, the time range and center coordinate will be
     # added onto each frame. The FrameAnnotation allows customizing the position of the label in pixel coordinates,
