@@ -1,7 +1,9 @@
 # motionshader
 Generate a gif or mp4 from geospatial vector data.
 
-![Demonstrationg using simulated dataset in Syra](https://github.com/hokieg3n1us/motionshader/raw/main/Syria.gif)
+
+
+![Demonstration using simulated dataset in Syria](https://raw.githubusercontent.com/hokieg3n1us/motionshader/master/Syria.gif)
 
 ### Example ###
 ```python
