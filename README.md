@@ -62,4 +62,4 @@ if __name__ == '__main__':
     # MotionVideo can be output as either a GIF or an MP4.
     motion_video.to_gif(viewport, playback, 'Syria', annotation, watermark, 1, colorcet.fire)
     motion_video.to_video(viewport, playback, 'Syria', annotation, watermark, 1, colorcet.fire)
-    ```
+```
