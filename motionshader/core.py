@@ -7,7 +7,7 @@ import datashader
 import imageio
 import numpy
 from PIL.ImageFont import FreeTypeFont
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from requests import Session
 
 
@@ -71,17 +71,20 @@ class Basemap:
 
 
 class Dataset:
-    df = None
+    data = None
     longitude_column = None
     latitude_column = None
+    cat_column = None
 
-    def __init__(self, df: dask.dataframe, longitude_column: str, latitude_column: str) -> None:
-        self.df = df
+    def __init__(self, data: dask.dataframe, longitude_column: str, latitude_column: str,
+                 cat_column: str = None) -> None:
+        self.data = data
         self.longitude_column = longitude_column
         self.latitude_column = latitude_column
+        self.cat_column = cat_column
 
     def subset(self, start_time: datetime, end_time: datetime) -> dask.dataframe:
-        return self.df[start_time: end_time]
+        return self.data[start_time: end_time]
 
 
 class FrameAnnotation:
@@ -92,7 +95,7 @@ class FrameAnnotation:
     lon_lat = None
     date_format = None
 
-    def __init__(self, pos_x: int, pos_y: int, font: FreeTypeFont = ImageFont.truetype('arial', 10),
+    def __init__(self, pos_x: int, pos_y: int, font: FreeTypeFont,
                  font_color: str = '#000000', lon_lat: bool = True, date_format: str = '%Y-%m-%dT%H:%M:%S%z') -> None:
         self.pos_x = pos_x
         self.pos_y = pos_y
@@ -104,12 +107,12 @@ class FrameAnnotation:
     def annotate(self, img, start_time, end_time, center_longitude, center_latitude):
         image_draw = ImageDraw.Draw(img)
 
-        annotation = "Time Range: {}/{} Center Coordinate: ({:0>3.3f}, {:0>2.3f})".format(
+        annotation = 'Time Range: {}/{} Center Coordinate: ({:0>3.3f}, {:0>2.3f})'.format(
             start_time.strftime(self.date_format), end_time.strftime(self.date_format),
             center_longitude, center_latitude)
 
         if not self.lon_lat:
-            annotation = "Time Range: {}/{} Center Coordinate: ({:0>2.3f}, {:0>3.3f})".format(
+            annotation = 'Time Range: {}/{} Center Coordinate: ({:0>2.3f}, {:0>3.3f})'.format(
                 start_time.strftime(self.date_format), end_time.strftime(self.date_format),
                 center_latitude, center_longitude)
 
@@ -125,7 +128,7 @@ class FrameWatermark:
     font = None
     font_color = None
 
-    def __init__(self, watermark: str, pos_x: int, pos_y: int, font: FreeTypeFont = ImageFont.truetype('arial', 10),
+    def __init__(self, watermark: str, pos_x: int, pos_y: int, font: FreeTypeFont,
                  font_color: str = '#000000') -> None:
         self.watermark = watermark
         self.pos_x = pos_x
@@ -149,22 +152,34 @@ class MotionVideo:
         self.dataset = dataset
         self.basemap = basemap
 
-    def _generate_frame(self, frame_df: dask.dataframe, viewport: GeospatialViewport, scale_points_pixels: int, color_map):
+    def _generate_frame(self, frame_data: dask.dataframe, viewport: GeospatialViewport, scale_points_pixels: int,
+                        color_map):
         cvs = datashader.Canvas(plot_width=viewport.width_pixels, plot_height=viewport.height_pixels,
                                 x_range=(viewport.min_longitude, viewport.max_longitude),
                                 y_range=(viewport.min_latitude, viewport.max_latitude))
-        agg = cvs.points(frame_df, self.dataset.longitude_column, self.dataset.latitude_column)
 
-        img = datashader.tf.shade(agg, cmap=color_map, how='eq_hist')
+        if self.dataset.cat_column is None:
+            img = datashader.tf.shade(
+                cvs.points(frame_data, self.dataset.longitude_column, self.dataset.latitude_column, datashader.count()),
+                cmap=color_map, how='eq_hist')
+        else:
+            img = datashader.tf.shade(
+                cvs.points(frame_data, self.dataset.longitude_column, self.dataset.latitude_column,
+                           datashader.count_cat(self.dataset.cat_column)), color_key=color_map)
 
         if scale_points_pixels != 0:
-            img = datashader.tf.spread(img, px=scale_points_pixels, shape="circle")
+            img = datashader.tf.spread(img, px=scale_points_pixels, shape='circle')
 
-        return img.to_pil().convert("RGBA")
+        return img.to_pil().convert('RGBA')
 
-    def to_gif(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_base_name: str,
+    def to_gif(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_name: str,
                annotation: FrameAnnotation = None,
                watermark: FrameWatermark = None, scale_points_pixels: int = 0, color_map=colorcet.fire):
+
+        if self.dataset.cat_column is not None:
+            categorical_error = 'The color_map parameter must be a dict mapping each category value to a color if categorical column is specified.'
+            assert isinstance(color_map, dict), categorical_error
+
         imgs = []
 
         tiles = self.basemap.get_tiles(viewport)
@@ -173,8 +188,8 @@ class MotionVideo:
         end = playback.end_time
 
         while start < end:
-            frame_df = self.dataset.subset(start, start + playback.frame_length)
-            frame = self._generate_frame(frame_df, viewport, scale_points_pixels, color_map)
+            frame_data = self.dataset.subset(start, start + playback.frame_length)
+            frame = self._generate_frame(frame_data, viewport, scale_points_pixels, color_map)
             img = Image.alpha_composite(tiles, frame)
 
             if annotation is not None:
@@ -187,22 +202,26 @@ class MotionVideo:
 
             start = start + playback.frame_step
 
-        imageio.mimsave(file_base_name + '.gif', imgs, fps=playback.frames_per_second)
+        imageio.mimsave(file_name, imgs, fps=playback.frames_per_second)
 
-    def to_video(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_base_name: str,
+    def to_video(self, viewport: GeospatialViewport, playback: TemporalPlayback, file_name: str,
                  annotation: FrameAnnotation = None,
                  watermark: FrameWatermark = None, scale_points_pixels: int = 0, color_map=colorcet.fire):
+
+        if self.dataset.cat_column is not None:
+            categorical_error = 'The color_map parameter must be a dict mapping each category value to a color if categorical column is specified.'
+            assert isinstance(color_map, dict), categorical_error
 
         tiles = self.basemap.get_tiles(viewport)
 
         start = playback.start_time
         end = playback.end_time
 
-        mp4_writer = imageio.get_writer(file_base_name + '.mp4', fps=playback.frames_per_second)
+        mp4_writer = imageio.get_writer(file_name, fps=playback.frames_per_second)
 
         while start < end:
-            frame_df = self.dataset.subset(start, start + playback.frame_length)
-            frame = self._generate_frame(frame_df, viewport, scale_points_pixels, color_map)
+            frame_data = self.dataset.subset(start, start + playback.frame_length)
+            frame = self._generate_frame(frame_data, viewport, scale_points_pixels, color_map)
             img = Image.alpha_composite(tiles, frame)
 
             if annotation is not None:
